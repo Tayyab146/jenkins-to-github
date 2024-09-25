@@ -1,10 +1,152 @@
 pipeline {
-    agent { docker { image 'maven:3.9.9-eclipse-temurin-21-alpine' } }
+    agent any
+
+    // Define environment variables
+    environment {
+        DOCKER_IMAGE = "myapp:latest"
+        DEPLOY_ENV = "staging"
+        TEST_REPORTS = "test-reports"
+    }
+
+    // Options to control pipeline execution
+    options {
+        timeout(time: 60, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '5'))
+        timestamps()
+    }
+
+    // Tools configuration
+    tools {
+        nodejs 'nodejs-latest'
+    }
+
     stages {
-        stage('build') {
+
+        // Stage 1: Checkout code from Git
+        stage('Checkout') {
             steps {
-                sh 'mvn --version'
+                git branch: 'main', url: 'https://github.com/example/myapp.git'
             }
+        }
+
+        // Stage 2: Install dependencies in parallel for backend and frontend
+        stage('Install Dependencies') {
+            parallel {
+                stage('Backend') {
+                    steps {
+                        dir('backend') {
+                            sh 'npm install'
+                        }
+                    }
+                }
+                stage('Frontend') {
+                    steps {
+                        dir('frontend') {
+                            sh 'npm install'
+                        }
+                    }
+                }
+            }
+        }
+
+        // Stage 3: Build Docker image for the app
+        stage('Build Docker Image') {
+            agent {
+                docker {
+                    image 'docker:latest'
+                    args '-v /var/run/docker.sock:/var/run/docker.sock'
+                }
+            }
+            steps {
+                script {
+                    sh 'docker build -t $DOCKER_IMAGE .'
+                }
+            }
+        }
+
+        // Stage 4: Run tests in parallel (unit tests and integration tests)
+        stage('Test') {
+            parallel {
+                stage('Unit Tests') {
+                    steps {
+                        dir('backend') {
+                            sh 'npm run test:unit'
+                        }
+                    }
+                    post {
+                        always {
+                            junit "${TEST_REPORTS}/unit/*.xml"
+                        }
+                    }
+                }
+                stage('Integration Tests') {
+                    steps {
+                        dir('backend') {
+                            sh 'npm run test:integration'
+                        }
+                    }
+                    post {
+                        always {
+                            junit "${TEST_REPORTS}/integration/*.xml"
+                        }
+                    }
+                }
+            }
+        }
+
+        // Stage 5: Static code analysis
+        stage('Static Code Analysis') {
+            steps {
+                sh 'npm run lint'
+            }
+        }
+
+        // Stage 6: Deploy to the staging environment
+        stage('Deploy to Staging') {
+            when {
+                environment name: 'DEPLOY_ENV', value: 'staging'
+            }
+            steps {
+                echo "Deploying app to the staging environment"
+                sh './deploy.sh staging'
+            }
+        }
+
+        // Stage 7: Manual approval for production deployment
+        stage('Approval for Production') {
+            when {
+                branch 'main'
+            }
+            steps {
+                input message: 'Approve deployment to production?', ok: 'Deploy'
+            }
+        }
+
+        // Stage 8: Deploy to production
+        stage('Deploy to Production') {
+            when {
+                branch 'main'
+            }
+            steps {
+                echo "Deploying app to production"
+                sh './deploy.sh production'
+            }
+        }
+    }
+
+    post {
+        always {
+            archiveArtifacts artifacts: '**/target/*.jar', allowEmptyArchive: true
+            cleanWs()  // Clean up workspace after build
+        }
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed!'
+        }
+        unstable {
+            echo 'Pipeline finished with warnings.'
         }
     }
 }
