@@ -1,127 +1,20 @@
 pipeline {
     agent any
-
-    environment {
-        APP_NAME = "MyApp"
-        DOCKER_IMAGE = "myorg/myapp"
-        DOCKER_TAG = "${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
-        SLACK_CHANNEL = "#build-notifications"
-    }
-
-    options {
-        timeout(time: 60, unit: 'MINUTES') // Pipeline timeout
-        timestamps() // Add timestamps to logs
-    }
-
-    triggers {
-        pollSCM('H/15 * * * *') // Poll source control every 15 minutes
-    }
-
     stages {
-        stage('Checkout') {
+        stage('Build') {
             steps {
-                echo "Checking out source code..."
-                checkout scm
+                echo 'Building...'
             }
         }
-
-        stage('Setup Environment') {
+        stage('Test') {
             steps {
-                echo "Setting up environment variables..."
-                script {
-                    env.BUILD_ENV = sh(script: 'echo $BUILD_ENV', returnStdout: true).trim()
-                }
+                echo 'Testing...'
             }
         }
-
-        stage('Static Analysis') {
+        stage('Deploy') {
             steps {
-                echo "Running static analysis tools..."
-                sh 'npm run lint'
+                echo 'Deploying...'
             }
-        }
-
-        stage('Build & Unit Tests') {
-            steps {
-                parallel (
-                    'Build Application': {
-                        echo "Building application..."
-                        sh 'npm install && npm run build'
-                    },
-                    'Run Unit Tests': {
-                        echo "Running unit tests..."
-                        sh 'npm test'
-                    }
-                )
-            }
-        }
-
-        stage('Docker Build & Push') {
-            when {
-                branch 'main'
-            }
-            steps {
-                echo "Building Docker image..."
-                sh """
-                docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} .
-                docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
-                """
-            }
-        }
-
-        stage('Integration Tests') {
-            steps {
-                echo "Running integration tests..."
-                sh './scripts/run_integration_tests.sh'
-            }
-        }
-
-        stage('Deploy to Staging') {
-            when {
-                branch 'main'
-            }
-            steps {
-                echo "Deploying to staging environment..."
-                sh './scripts/deploy_staging.sh'
-            }
-        }
-
-        stage('Approval for Production') {
-            when {
-                branch 'main'
-            }
-            steps {
-                script {
-                    timeout(time: 30, unit: 'MINUTES') {
-                        input message: "Approve deployment to production?", ok: "Deploy"
-                    }
-                }
-            }
-        }
-
-        stage('Deploy to Production') {
-            when {
-                branch 'main'
-            }
-            steps {
-                echo "Deploying to production environment..."
-                sh './scripts/deploy_production.sh'
-            }
-        }
-    }
-
-    post {
-        always {
-            echo "Cleaning up workspace..."
-            cleanWs()
-        }
-        success {
-            echo "Pipeline succeeded!"
-            slackSend channel: SLACK_CHANNEL, message: "Build #${BUILD_NUMBER} succeeded: ${BUILD_URL}"
-        }
-        failure {
-            echo "Pipeline failed!"
-            slackSend channel: SLACK_CHANNEL, message: "Build #${BUILD_NUMBER} failed: ${BUILD_URL}"
         }
     }
 }
